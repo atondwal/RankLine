@@ -303,6 +303,19 @@ public class RankLineView extends View {
         float y = event.getY();
 
         switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_POINTER_DOWN:
+                // Second finger tap cancels repositioning
+                if (isRepositioning && repositioningItem != null) {
+                    repositioningItem.position = repositionOriginal;
+                    repositioningItem = null;
+                    isRepositioning = false;
+                    isBrowsing = false;
+                    performHapticFeedback(HapticFeedbackConstants.REJECT);
+                    invalidate();
+                    return true;
+                }
+                break;
+
             case MotionEvent.ACTION_DOWN:
                 touchDownX = x;
                 touchDownY = y;
@@ -479,9 +492,9 @@ public class RankLineView extends View {
                 }
 
                 if (isRepositioning && repositioningItem != null) {
-                    // Cancel if released in the card area (dragged back down)
-                    boolean inCardZone = y > getLineY() + 60;
-                    if (inCardZone) {
+                    double moved = Math.abs(repositioningItem.position - repositionOriginal);
+                    float dpMoved = (float)(moved / visibleWidth() * getWidth());
+                    if (dpMoved < CANCEL_THRESHOLD) {
                         repositioningItem.position = repositionOriginal;
                     } else if (listener != null) {
                         listener.onItemRepositioned(repositioningItem);
