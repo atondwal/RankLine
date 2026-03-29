@@ -116,8 +116,8 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
                 ? browseSorted.get(browseIndex - 1).position : -1.0;
         double rightPos = browseIndex < browseSorted.size() - 1
                 ? browseSorted.get(browseIndex + 1).position : 1.0;
-        double span = rightPos - leftPos;
-        double zoom = Math.max(1.0, 2.0 / (span * 1.5));
+        double span = Math.max(rightPos - leftPos, 1e-10);
+        double zoom = Math.max(1.0, Math.min(1e8, 2.0 / (span * 1.5)));
         rankLineView.setViewState(item.position, zoom);
     }
 
