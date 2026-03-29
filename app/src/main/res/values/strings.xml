@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">RankLine</string>
+    <string name="add_url">Add Image URL</string>
+    <string name="import_feed">Import Feed</string>
+    <string name="add_gallery">Add from Gallery</string>
+    <string name="browse_rankings">Browse Rankings</string>
+</resources>
