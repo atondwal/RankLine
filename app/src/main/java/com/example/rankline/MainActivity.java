@@ -110,6 +110,15 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
         RankedItem item = browseSorted.get(browseIndex);
         loadPreview(item);
         rankLineView.setBrowseItem(item, browseIndex, browseSorted.size());
+
+        // Center view on item; zoom to show nearest neighbors
+        double leftPos = browseIndex > 0
+                ? browseSorted.get(browseIndex - 1).position : -1.0;
+        double rightPos = browseIndex < browseSorted.size() - 1
+                ? browseSorted.get(browseIndex + 1).position : 1.0;
+        double span = rightPos - leftPos;
+        double zoom = Math.max(1.0, 2.0 / (span * 1.5));
+        rankLineView.setViewState(item.position, zoom);
     }
 
     @Override
