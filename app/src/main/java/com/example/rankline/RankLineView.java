@@ -479,9 +479,9 @@ public class RankLineView extends View {
                 }
 
                 if (isRepositioning && repositioningItem != null) {
-                    double moved = Math.abs(repositioningItem.position - repositionOriginal);
-                    float dpMoved = (float)(moved / visibleWidth() * getWidth());
-                    if (dpMoved < CANCEL_THRESHOLD) {
+                    // Cancel if released in the card area (dragged back down)
+                    boolean inCardZone = y > getLineY() + 60;
+                    if (inCardZone) {
                         repositioningItem.position = repositionOriginal;
                     } else if (listener != null) {
                         listener.onItemRepositioned(repositioningItem);
