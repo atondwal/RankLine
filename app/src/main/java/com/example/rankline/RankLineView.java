@@ -17,7 +17,6 @@ import java.util.List;
 public class RankLineView extends View {
 
     // --- Constants ---
-    private static final double Z_MAX = 10_000.0;
     private static final float DEAD_ZONE = 48f;
     private static final int OVERVIEW_HEIGHT = 40;
     private static final int OVERVIEW_TOP = 8;
@@ -239,8 +238,10 @@ public class RankLineView extends View {
     }
 
     // --- Zoom function ---
-    // Maps finger Y to zoom level. Full screen height below line is the zoom zone,
-    // regardless of card visibility (finger can be over the card during drag).
+    // Maps finger Y to zoom level using 1/(1-t)^4.
+    // Asymptotically infinite at the bottom of the screen.
+    // At 90% down: ~10,000x. Last 10% gives 8+ more orders of magnitude.
+    // Capped at 1e12 to stay within double precision.
     private double computeZoom(float y) {
         int h = getHeight();
         float lineY = getLineY();
@@ -248,7 +249,10 @@ public class RankLineView extends View {
         float zoneEnd = h;
         if (zoneEnd <= zoneStart) return 1.0;
         float t = Math.max(0, Math.min(1, (y - zoneStart) / (zoneEnd - zoneStart)));
-        return Math.pow(Z_MAX, t);
+        double denom = 1.0 - t;
+        if (denom < 1e-3) denom = 1e-3; // cap at 1e12
+        double d2 = denom * denom;
+        return 1.0 / (d2 * d2);
     }
 
     private double visibleWidth() {
@@ -352,7 +356,8 @@ public class RankLineView extends View {
                 // Browse card touch: horizontal swipe or drag-up to reposition
                 if (browseTouching && !isRepositioning) {
                     float totalDy = touchDownY - y;
-                    if (totalDy > 40) {
+                    float totalDx = Math.abs(x - touchDownX);
+                    if (totalDy > 120 && totalDy > totalDx * 2.5f) {
                         // Drag up — reposition this item
                         browseTouching = false;
                         isRepositioning = true;
