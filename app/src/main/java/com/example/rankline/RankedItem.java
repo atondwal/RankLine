@@ -1,7 +1,6 @@
 package com.example.rankline;
 
 import android.graphics.Bitmap;
-import android.graphics.drawable.Drawable;
 import java.util.UUID;
 
 public class RankedItem {
@@ -9,8 +8,8 @@ public class RankedItem {
     public double position; // in (-1, 1)
     public String imageUrl;
     public Bitmap thumbnail;  // small, for number line
-    public Drawable preview;  // larger, for inbox/browse display (may be animated GIF)
     public String label;
+    public boolean isVideo;
 
     public RankedItem(String imageUrl, String label) {
         this.id = UUID.randomUUID().toString();

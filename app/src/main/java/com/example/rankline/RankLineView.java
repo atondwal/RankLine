@@ -44,11 +44,27 @@ public class RankLineView extends View {
     private static final int CARD_INFO_BAR = 56;
     private int inboxQueueSize = 0;
 
+    // Current card preview (loaded fresh each time a card is shown)
+    private Drawable cardPreview = null;
+
     // Browse mode state
     private RankedItem browseItem = null;
     private int browseIndex = -1;
     private int browseTotal = 0;
     private boolean browseTouching = false;
+
+    // Video state
+    private boolean videoActive = false;
+    private boolean videoMuted = true;
+
+    // Mode bar state
+    private int modeBarInboxCount = 0;
+    private int modeBarBrowseCount = 0;
+    private final RectF modeBarRect = new RectF();
+    private final RectF modeBarInboxPill = new RectF();
+    private final RectF modeBarBrowsePill = new RectF();
+    private static final int MODE_BAR_HEIGHT = 56;
+    private static final int MODE_BAR_MARGIN = 12;
 
     // --- Touch state ---
     private float touchDownX, touchDownY;
@@ -90,6 +106,9 @@ public class RankLineView extends View {
         void onBrowseClose();
         void onBrowseRepositioned(RankedItem item);
         void onBrowseRemoveToInbox(RankedItem item);
+        void onModeBarInboxTapped();
+        void onModeBarBrowseTapped();
+        void onVideoMuteToggle();
     }
     private Listener listener;
 
@@ -176,6 +195,7 @@ public class RankLineView extends View {
 
     public void setInboxItem(RankedItem item) {
         this.inboxItem = item;
+        if (item == null) cardPreview = null;
         invalidate();
     }
 
@@ -197,13 +217,43 @@ public class RankLineView extends View {
         this.browseItem = null;
         this.browseIndex = -1;
         this.browseTotal = 0;
+        cardPreview = null;
         invalidate();
     }
 
     public boolean isBrowseMode() { return browseItem != null; }
 
+    public void setVideoActive(boolean active, boolean muted) {
+        this.videoActive = active;
+        this.videoMuted = muted;
+        invalidate();
+    }
+
+    /** Returns the card image area bounds. Returns false if no card visible. */
+    public boolean getCardImageRect(RectF out) {
+        int w = getWidth();
+        int h = getHeight();
+        if (w == 0 || h == 0 || !hasCard()) return false;
+        float lineY = getLineY();
+        float cTop = lineY + 60;
+        float cBot = h - CARD_MARGIN;
+        float cLeft = CARD_MARGIN;
+        float cRight = w - CARD_MARGIN;
+        float infoTop = cBot - CARD_INFO_BAR;
+        float imgPad = 12;
+        out.set(cLeft + imgPad, cTop + imgPad, cRight - imgPad, infoTop - 4);
+        return true;
+    }
+
+    public void setModeBarCounts(int inbox, int browse) {
+        this.modeBarInboxCount = inbox;
+        this.modeBarBrowseCount = browse;
+        invalidate();
+    }
+
     /** Bind a preview drawable so animated GIFs get an invalidate callback. */
     public void bindPreviewDrawable(Drawable d) {
+        cardPreview = d;
         if (d != null) {
             d.setCallback(this);
             if (d instanceof Animatable) {
@@ -214,9 +264,7 @@ public class RankLineView extends View {
 
     @Override
     protected boolean verifyDrawable(Drawable who) {
-        // Allow any preview drawable to trigger invalidation
-        RankedItem card = cardItem();
-        if (card != null && card.preview == who) return true;
+        if (cardPreview == who) return true;
         return super.verifyDrawable(who);
     }
 
@@ -323,6 +371,18 @@ public class RankLineView extends View {
                 lastTouchY = y;
                 touchDownTime = System.currentTimeMillis();
                 longPressTriggered = false;
+
+                // Check mode bar pill hit
+                if (!hasCard() && hasModeBar()) {
+                    if (modeBarInboxPill.contains(x, y) && modeBarInboxCount > 0) {
+                        if (listener != null) listener.onModeBarInboxTapped();
+                        return true;
+                    }
+                    if (modeBarBrowsePill.contains(x, y) && modeBarBrowseCount > 0) {
+                        if (listener != null) listener.onModeBarBrowseTapped();
+                        return true;
+                    }
+                }
 
                 // Check card hit (inbox or browse)
                 if (hasCard() && cardRect.contains(x, y)) {
@@ -453,7 +513,11 @@ public class RankLineView extends View {
                             if (totalDx < 0) listener.onCardSkipForward();
                             else listener.onCardSkipBackward();
                         } else if (Math.abs(totalDx) < 15 && Math.abs(totalDy) < 15) {
-                            listener.onBrowseClose();
+                            if (videoActive) {
+                                listener.onVideoMuteToggle();
+                            } else {
+                                listener.onBrowseClose();
+                            }
                         }
                     }
                     invalidate();
@@ -464,10 +528,15 @@ public class RankLineView extends View {
                 if (inboxTouching) {
                     inboxTouching = false;
                     float totalDx = x - touchDownX;
-                    if (event.getActionMasked() == MotionEvent.ACTION_UP && Math.abs(totalDx) > 60) {
-                        if (listener != null) {
-                            if (totalDx < 0) listener.onCardSkipForward();
-                            else listener.onCardSkipBackward();
+                    float totalDy = y - touchDownY;
+                    if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                        if (Math.abs(totalDx) > 60) {
+                            if (listener != null) {
+                                if (totalDx < 0) listener.onCardSkipForward();
+                                else listener.onCardSkipBackward();
+                            }
+                        } else if (videoActive && Math.abs(totalDx) < 15 && Math.abs(totalDy) < 15) {
+                            if (listener != null) listener.onVideoMuteToggle();
                         }
                     }
                     invalidate();
@@ -566,6 +635,68 @@ public class RankLineView extends View {
         }
 
         drawCard(canvas, w, h);
+
+        if (!hasCard() && !inboxDragging && hasModeBar()) {
+            drawModeBar(canvas, w, h);
+        }
+    }
+
+    private boolean hasModeBar() {
+        return modeBarInboxCount > 0 || modeBarBrowseCount > 0;
+    }
+
+    private void drawModeBar(Canvas canvas, int w, int h) {
+        float barTop = h - MODE_BAR_HEIGHT - MODE_BAR_MARGIN;
+        float barBot = h - MODE_BAR_MARGIN;
+        float barLeft = MODE_BAR_MARGIN;
+        float barRight = w - MODE_BAR_MARGIN;
+        modeBarRect.set(barLeft, barTop, barRight, barBot);
+
+        // Bar background
+        Paint barBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        barBg.setColor(0xFF1A1A1A);
+        canvas.drawRoundRect(modeBarRect, 16, 16, barBg);
+
+        Paint pillBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        pillBg.setColor(0xFF2A2A2A);
+        Paint pillText = new Paint(Paint.ANTI_ALIAS_FLAG);
+        pillText.setColor(0xFFCCCCCC);
+        pillText.setTextSize(26f);
+        pillText.setTextAlign(Paint.Align.CENTER);
+        pillText.setTypeface(Typeface.DEFAULT_BOLD);
+
+        // Measure pills
+        String inboxLabel = "Inbox (" + modeBarInboxCount + ")";
+        String browseLabel = "Browse (" + modeBarBrowseCount + ")";
+        boolean showInbox = modeBarInboxCount > 0;
+        boolean showBrowse = modeBarBrowseCount > 0;
+
+        float pillH = 36;
+        float pillPad = 24;
+        float pillGap = 16;
+        float pillY = barTop + (MODE_BAR_HEIGHT - pillH) / 2f;
+
+        float inboxW = showInbox ? pillText.measureText(inboxLabel) + pillPad * 2 : 0;
+        float browseW = showBrowse ? pillText.measureText(browseLabel) + pillPad * 2 : 0;
+        float totalW = inboxW + browseW + (showInbox && showBrowse ? pillGap : 0);
+        float startX = (barLeft + barRight - totalW) / 2f;
+
+        // Reset pill rects
+        modeBarInboxPill.setEmpty();
+        modeBarBrowsePill.setEmpty();
+
+        float cx = startX;
+        if (showInbox) {
+            modeBarInboxPill.set(cx, pillY, cx + inboxW, pillY + pillH);
+            canvas.drawRoundRect(modeBarInboxPill, pillH / 2f, pillH / 2f, pillBg);
+            canvas.drawText(inboxLabel, cx + inboxW / 2f, pillY + pillH / 2f + 9, pillText);
+            cx += inboxW + pillGap;
+        }
+        if (showBrowse) {
+            modeBarBrowsePill.set(cx, pillY, cx + browseW, pillY + pillH);
+            canvas.drawRoundRect(modeBarBrowsePill, pillH / 2f, pillH / 2f, pillBg);
+            canvas.drawText(browseLabel, cx + browseW / 2f, pillY + pillH / 2f + 9, pillText);
+        }
     }
 
     // --- Overview bar ---
@@ -799,8 +930,10 @@ public class RankLineView extends View {
         float imgW = imgRight - imgLeft;
         float imgH = imgBot - imgTop;
 
-        Drawable previewDrawable = item.preview;
-        if (previewDrawable != null) {
+        if (videoActive) {
+            // Video is playing via PlayerView overlay — skip drawing image area
+        } else if (cardPreview != null) {
+            Drawable previewDrawable = cardPreview;
             float bmpW = previewDrawable.getIntrinsicWidth();
             float bmpH = previewDrawable.getIntrinsicHeight();
             if (bmpW <= 0) bmpW = imgW;
@@ -843,6 +976,15 @@ public class RankLineView extends View {
         Paint infoPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         infoPaint.setTextSize(22f);
 
+        // Mute icon for video items
+        if (videoActive) {
+            String muteIcon = videoMuted ? "\uD83D\uDD07" : "\uD83D\uDD0A";
+            infoPaint.setColor(0xFFCCCCCC);
+            infoPaint.setTextAlign(Paint.Align.RIGHT);
+            infoPaint.setTextSize(24f);
+            canvas.drawText(muteIcon, cRight - 16, textY, infoPaint);
+        }
+
         if (isBrowse) {
             // Left: position value
             cursorLabelPaint.setTextSize(24f);
@@ -851,13 +993,14 @@ public class RankLineView extends View {
             cursorLabelPaint.setTextSize(28f);
             cursorLabelPaint.setTextAlign(Paint.Align.CENTER);
 
-            // Right: #N of M + nav arrows
+            // Right: #N of M + nav arrows (shift left if video icon present)
             infoPaint.setColor(0xFFAAAAAA);
             infoPaint.setTextAlign(Paint.Align.RIGHT);
+            float navRight = videoActive ? cRight - 56 : cRight - 16;
             String nav = (browseIndex > 0 ? "\u276E  " : "    ")
                     + "#" + (browseIndex + 1) + " of " + browseTotal
                     + (browseIndex < browseTotal - 1 ? "  \u276F" : "");
-            canvas.drawText(nav, cRight - 16, textY, infoPaint);
+            canvas.drawText(nav, navRight, textY, infoPaint);
 
             // Label if present
             if (browseItem.label != null && !browseItem.label.isEmpty()) {

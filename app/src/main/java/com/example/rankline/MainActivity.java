@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -11,6 +12,7 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
@@ -18,6 +20,10 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.ui.PlayerView;
 
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.request.target.CustomTarget;
@@ -47,6 +53,12 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
     // Browse state
     private List<RankedItem> browseSorted = new ArrayList<>();
     private int browseIndex = -1;
+    private String lastBrowseItemId = null;
+
+    // Video state
+    private PlayerView videoPlayerView;
+    private ExoPlayer exoPlayer;
+    private boolean videoMuted = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,6 +70,9 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
         rankLineView = findViewById(R.id.rankLineView);
         rankLineView.setListener(this);
 
+        videoPlayerView = findViewById(R.id.videoPlayer);
+        videoPlayerView.setUseController(false);
+
         Toolbar toolbar = findViewById(R.id.toolbar);
         if (toolbar != null) {
             setSupportActionBar(toolbar);
@@ -67,6 +82,12 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
         }
 
         loadRankings();
+    }
+
+    @Override
+    protected void onDestroy() {
+        hideVideoPlayer();
+        super.onDestroy();
     }
 
     // --- Browse mode ---
@@ -90,12 +111,38 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
             }
         }
         showBrowseItem();
+        updateModeBar();
+    }
+
+    private void openBrowseAtLastPosition() {
+        List<RankedItem> items = rankLineView.getItems();
+        if (items.isEmpty()) {
+            Toast.makeText(this, "No ranked items yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        browseSorted = new ArrayList<>(items);
+        browseSorted.sort(Comparator.comparingDouble(a -> a.position));
+
+        browseIndex = 0;
+        if (lastBrowseItemId != null) {
+            for (int i = 0; i < browseSorted.size(); i++) {
+                if (browseSorted.get(i).id.equals(lastBrowseItemId)) {
+                    browseIndex = i;
+                    break;
+                }
+            }
+        }
+        showBrowseItem();
+        updateModeBar();
     }
 
     private void closeBrowse() {
         browseSorted.clear();
         browseIndex = -1;
+        hideVideoPlayer();
         rankLineView.clearBrowse();
+        updateModeBar();
     }
 
     private void navigateBrowse(int delta) {
@@ -108,6 +155,7 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
     private void showBrowseItem() {
         if (browseIndex < 0 || browseIndex >= browseSorted.size()) return;
         RankedItem item = browseSorted.get(browseIndex);
+        lastBrowseItemId = item.id;
         loadPreview(item);
         rankLineView.setBrowseItem(item, browseIndex, browseSorted.size());
 
@@ -147,7 +195,7 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
             showImportFeedDialog();
             return true;
         } else if (id == R.id.action_browse) {
-            openBrowse(null);
+            openBrowseAtLastPosition();
             return true;
         } else if (id == R.id.action_add_gallery) {
             openGalleryPicker();
@@ -244,7 +292,8 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
     // --- Gallery picker ---
     private void openGalleryPicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.setType("image/*");
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
@@ -273,12 +322,22 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
                 getContentResolver().takePersistableUriPermission(uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION);
             } catch (SecurityException e) { /* ok */ }
-            addToInbox(uri.toString(), getFileNameFromUri(uri));
+            String mime = getContentResolver().getType(uri);
+            boolean isVideo = mime != null && mime.startsWith("video/");
+            RankedItem item = new RankedItem(uri.toString(), getFileNameFromUri(uri));
+            item.isVideo = isVideo;
+            inboxQueue.addLast(item);
+            loadThumbnail(item);
             count++;
         }
+        if (!inboxQueue.isEmpty() && rankLineView.getInboxItem() == null
+                && !rankLineView.isBrowseMode()) {
+            showNextInboxItem();
+        }
+        updateInboxCount();
 
         if (count > 0) {
-            Toast.makeText(this, "Added " + count + " image" + (count > 1 ? "s" : ""),
+            Toast.makeText(this, "Added " + count + " item" + (count > 1 ? "s" : ""),
                     Toast.LENGTH_SHORT).show();
         }
     }
@@ -298,6 +357,7 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
     // --- Inbox management ---
     private void addToInbox(String url, String label) {
         RankedItem item = new RankedItem(url, label);
+        item.isVideo = looksLikeVideo(url);
         inboxQueue.addLast(item);
         loadThumbnail(item);
         if (rankLineView.getInboxItem() == null && !rankLineView.isBrowseMode()) {
@@ -312,36 +372,44 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
             rankLineView.setInboxItem(next);
             loadPreview(next);
         } else {
+            hideVideoPlayer();
             rankLineView.setInboxItem(null);
         }
         updateInboxCount();
     }
 
     private void loadPreview(RankedItem item) {
-        if (item.preview != null) {
-            rankLineView.bindPreviewDrawable(item.preview);
-            rankLineView.invalidate();
-            return;
+        if (item.isVideo) {
+            showVideoPlayer(item);
+        } else {
+            hideVideoPlayer();
+            Glide.with(this)
+                    .load(item.imageUrl)
+                    .into(new CustomTarget<Drawable>() {
+                        @Override
+                        public void onResourceReady(@NonNull Drawable resource,
+                                @Nullable Transition<? super Drawable> transition) {
+                            rankLineView.bindPreviewDrawable(resource);
+                            rankLineView.invalidate();
+                        }
+                        @Override
+                        public void onLoadCleared(@Nullable Drawable placeholder) {}
+                    });
         }
-        Glide.with(this)
-                .load(item.imageUrl)
-                .into(new CustomTarget<Drawable>() {
-                    @Override
-                    public void onResourceReady(@NonNull Drawable resource,
-                            @Nullable Transition<? super Drawable> transition) {
-                        item.preview = resource;
-                        rankLineView.bindPreviewDrawable(resource);
-                        rankLineView.invalidate();
-                    }
-                    @Override
-                    public void onLoadCleared(@Nullable Drawable placeholder) {}
-                });
     }
 
     private void updateInboxCount() {
         int count = inboxQueue.size();
         if (rankLineView.getInboxItem() != null) count++;
         rankLineView.setInboxQueueSize(count);
+        updateModeBar();
+    }
+
+    private void updateModeBar() {
+        int inboxCount = inboxQueue.size();
+        if (rankLineView.getInboxItem() != null) inboxCount++;
+        int browseCount = rankLineView.getItems().size();
+        rankLineView.setModeBarCounts(inboxCount, browseCount);
     }
 
     private void loadThumbnail(RankedItem item) {
@@ -362,10 +430,59 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
                 });
     }
 
+    // --- Video playback ---
+    private static boolean looksLikeVideo(String url) {
+        String lower = url.toLowerCase();
+        return lower.endsWith(".mp4") || lower.endsWith(".webm")
+                || lower.endsWith(".mov") || lower.endsWith(".m3u8")
+                || lower.endsWith(".mkv") || lower.endsWith(".avi");
+    }
+
+    private void showVideoPlayer(RankedItem item) {
+        hideVideoPlayer();
+
+        exoPlayer = new ExoPlayer.Builder(this).build();
+        exoPlayer.setRepeatMode(Player.REPEAT_MODE_ONE);
+        exoPlayer.setVolume(videoMuted ? 0f : 1f);
+        videoPlayerView.setPlayer(exoPlayer);
+
+        MediaItem mediaItem = MediaItem.fromUri(item.imageUrl);
+        exoPlayer.setMediaItem(mediaItem);
+        exoPlayer.prepare();
+        exoPlayer.play();
+
+        // Position PlayerView over the card image area
+        rankLineView.post(() -> {
+            RectF rect = new RectF();
+            if (rankLineView.getCardImageRect(rect)) {
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        (int) rect.width(), (int) rect.height());
+                lp.leftMargin = (int) rect.left;
+                lp.topMargin = (int) rect.top;
+                videoPlayerView.setLayoutParams(lp);
+            }
+            videoPlayerView.setVisibility(android.view.View.VISIBLE);
+        });
+
+        rankLineView.setVideoActive(true, videoMuted);
+    }
+
+    private void hideVideoPlayer() {
+        if (exoPlayer != null) {
+            exoPlayer.stop();
+            exoPlayer.release();
+            exoPlayer = null;
+        }
+        videoPlayerView.setVisibility(android.view.View.GONE);
+        videoPlayerView.setPlayer(null);
+        rankLineView.setVideoActive(false, videoMuted);
+    }
+
     // --- Listener callbacks ---
     @Override
     public void onItemPlaced(RankedItem item) {
         saveRankings();
+        updateModeBar();
     }
 
     @Override
@@ -385,6 +502,7 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
 
     @Override
     public void onCardSkipForward() {
+        hideVideoPlayer();
         if (rankLineView.isBrowseMode()) {
             navigateBrowse(1);
         } else {
@@ -399,6 +517,7 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
 
     @Override
     public void onCardSkipBackward() {
+        hideVideoPlayer();
         if (rankLineView.isBrowseMode()) {
             navigateBrowse(-1);
         } else {
@@ -423,16 +542,49 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
 
     @Override
     public void onBrowseRemoveToInbox(RankedItem item) {
-        closeBrowse();
-        saveRankings();
-        // Put item at front of inbox
+        hideVideoPlayer();
+        // Add removed item to inbox queue (front, pushing any current inbox item back)
         RankedItem current = rankLineView.getInboxItem();
         if (current != null) {
             inboxQueue.addFirst(current);
         }
-        rankLineView.setInboxItem(item);
-        loadPreview(item);
+        inboxQueue.addFirst(item);
         updateInboxCount();
+
+        // Remove from browse list
+        browseSorted.remove(item);
+        saveRankings();
+
+        if (!browseSorted.isEmpty()) {
+            // Clamp index and stay in browse
+            if (browseIndex >= browseSorted.size()) {
+                browseIndex = browseSorted.size() - 1;
+            }
+            showBrowseItem();
+        } else {
+            // No items left — exit browse
+            closeBrowse();
+            showNextInboxItem();
+        }
+    }
+
+    @Override
+    public void onModeBarInboxTapped() {
+        showNextInboxItem();
+    }
+
+    @Override
+    public void onModeBarBrowseTapped() {
+        openBrowseAtLastPosition();
+    }
+
+    @Override
+    public void onVideoMuteToggle() {
+        videoMuted = !videoMuted;
+        if (exoPlayer != null) {
+            exoPlayer.setVolume(videoMuted ? 0f : 1f);
+        }
+        rankLineView.setVideoActive(true, videoMuted);
     }
 
     @Override
@@ -463,6 +615,7 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
                 obj.put("position", item.position);
                 obj.put("imageUrl", item.imageUrl);
                 obj.put("label", item.label != null ? item.label : "");
+                if (item.isVideo) obj.put("isVideo", true);
                 arr.put(obj);
             }
             root.put("items", arr);
@@ -471,6 +624,10 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
             view.put("center", rankLineView.getCenter());
             view.put("zoom", rankLineView.getCurrentZoom());
             root.put("view", view);
+
+            if (lastBrowseItemId != null) {
+                root.put("lastBrowseItemId", lastBrowseItemId);
+            }
 
             File f = new File(getFilesDir(), SAVE_FILE);
             FileOutputStream fos = new FileOutputStream(f);
@@ -503,6 +660,7 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
                         obj.getString("imageUrl"),
                         obj.optString("label", "")
                 );
+                item.isVideo = obj.optBoolean("isVideo", false);
                 loaded.add(item);
                 loadThumbnail(item);
             }
@@ -512,6 +670,12 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
                 JSONObject view = root.getJSONObject("view");
                 rankLineView.setViewState(view.getDouble("center"), view.getDouble("zoom"));
             }
+
+            if (root.has("lastBrowseItemId")) {
+                lastBrowseItemId = root.getString("lastBrowseItemId");
+            }
+
+            updateModeBar();
         } catch (Exception e) {
             e.printStackTrace();
         }
