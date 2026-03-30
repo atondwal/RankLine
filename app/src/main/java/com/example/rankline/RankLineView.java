@@ -378,6 +378,8 @@ public class RankLineView extends View {
                     repositioningItem = null;
                     isRepositioning = false;
                     isBrowsing = false;
+                    scrubItem = null;
+                    cardPreview = null;
                     performHapticFeedback(HapticFeedbackConstants.REJECT);
                     invalidate();
                     return true;
@@ -515,6 +517,16 @@ public class RankLineView extends View {
                         repositioningItem.position = viewCenterRange();
                         repositioningItem.position = Math.max(-0.9999, Math.min(0.9999, repositioningItem.position));
                     }
+
+                    // Neighbor preview during placement/reposition
+                    RankedItem exclude = isRepositioning ? repositioningItem : null;
+                    RankedItem nearest = findNearestItemToCenter(exclude);
+                    if (nearest != scrubItem) {
+                        scrubItem = nearest;
+                        cardPreview = null;
+                        if (listener != null) listener.onScrubItemChanged(nearest);
+                    }
+
                     lastTouchX = x;
                     lastTouchY = y;
                     invalidate();
@@ -615,6 +627,8 @@ public class RankLineView extends View {
                     isPlacing = false;
                     isBrowsing = false;
                     inboxDragging = false;
+                    scrubItem = null;
+                    cardPreview = null;
                     invalidate();
                     return true;
                 }
@@ -636,6 +650,8 @@ public class RankLineView extends View {
                     repositioningItem = null;
                     isRepositioning = false;
                     isBrowsing = false;
+                    scrubItem = null;
+                    cardPreview = null;
                     invalidate();
                     return true;
                 }
@@ -689,11 +705,16 @@ public class RankLineView extends View {
     }
 
     private RankedItem findNearestItemToCenter() {
+        return findNearestItemToCenter(null);
+    }
+
+    private RankedItem findNearestItemToCenter(RankedItem exclude) {
         if (items.isEmpty()) return null;
         double hw = visibleWidth() / 2.0;
         RankedItem nearest = null;
         double minDist = Double.MAX_VALUE;
         for (RankedItem item : items) {
+            if (item == exclude) continue;
             double dist = Math.abs(item.position - center);
             if (dist < minDist) {
                 minDist = dist;
@@ -1050,7 +1071,8 @@ public class RankLineView extends View {
         float cBot = h - CARD_MARGIN;
         cardRect.set(cLeft, cTop, cRight, cBot);
 
-        int alpha = inboxDragging ? 80 : 255;
+        // Neighbor preview during placement shows at full opacity
+        int alpha = (inboxDragging && scrubItem == null) ? 80 : 255;
         inboxBgPaint.setAlpha(alpha);
         canvas.drawRoundRect(cardRect, 16, 16, inboxBgPaint);
 
