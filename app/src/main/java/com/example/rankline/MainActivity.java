@@ -588,6 +588,29 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
     }
 
     @Override
+    public void onScrubItemChanged(RankedItem item) {
+        hideVideoPlayer();
+        if (item != null) {
+            final String targetId = item.id;
+            Glide.with(this)
+                    .load(item.imageUrl)
+                    .into(new CustomTarget<Drawable>() {
+                        @Override
+                        public void onResourceReady(@NonNull Drawable resource,
+                                @Nullable Transition<? super Drawable> transition) {
+                            RankedItem scrub = rankLineView.getScrubItem();
+                            if (scrub != null && scrub.id.equals(targetId)) {
+                                rankLineView.bindPreviewDrawable(resource);
+                                rankLineView.invalidate();
+                            }
+                        }
+                        @Override
+                        public void onLoadCleared(@Nullable Drawable placeholder) {}
+                    });
+        }
+    }
+
+    @Override
     public void onBrowseRepositioned(RankedItem item) {
         // Re-sort browse list after an item was repositioned
         if (!browseSorted.isEmpty()) {

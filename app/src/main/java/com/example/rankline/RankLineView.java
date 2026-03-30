@@ -57,6 +57,10 @@ public class RankLineView extends View {
     private boolean videoActive = false;
     private boolean videoMuted = true;
 
+    // Scrub preview state
+    private RankedItem scrubItem = null;
+    private boolean scrubActive = false;
+
     // Mode bar state
     private int modeBarInboxCount = 0;
     private int modeBarBrowseCount = 0;
@@ -109,6 +113,7 @@ public class RankLineView extends View {
         void onModeBarInboxTapped();
         void onModeBarBrowseTapped();
         void onVideoMuteToggle();
+        void onScrubItemChanged(RankedItem item);
     }
     private Listener listener;
 
@@ -223,6 +228,8 @@ public class RankLineView extends View {
 
     public boolean isBrowseMode() { return browseItem != null; }
 
+    public RankedItem getScrubItem() { return scrubItem; }
+
     public void setVideoActive(boolean active, boolean muted) {
         this.videoActive = active;
         this.videoMuted = muted;
@@ -269,11 +276,13 @@ public class RankLineView extends View {
     }
 
     private boolean hasCard() {
-        return inboxItem != null || browseItem != null;
+        return inboxItem != null || browseItem != null || scrubItem != null;
     }
 
     private RankedItem cardItem() {
-        return browseItem != null ? browseItem : inboxItem;
+        if (browseItem != null) return browseItem;
+        if (scrubItem != null) return scrubItem;
+        return inboxItem;
     }
 
     public double getCenter() { return center; }
@@ -365,6 +374,14 @@ public class RankLineView extends View {
                 break;
 
             case MotionEvent.ACTION_DOWN:
+                // Clear scrub preview from previous interaction
+                if (scrubItem != null) {
+                    scrubItem = null;
+                    scrubActive = false;
+                    cardPreview = null;
+                    if (listener != null) listener.onScrubItemChanged(null);
+                }
+
                 touchDownX = x;
                 touchDownY = y;
                 lastTouchX = x;
@@ -484,6 +501,20 @@ public class RankLineView extends View {
                     double dxRange = -(dx / getWidth()) * vw * 2.5;
                     center += dxRange;
                     clampCenter();
+
+                    // Scrub preview: show nearest item when no inbox/browse card
+                    if (!scrubActive && (Math.abs(x - touchDownX) > 15 || Math.abs(y - touchDownY) > 15)) {
+                        scrubActive = true;
+                    }
+                    if (scrubActive && inboxItem == null && browseItem == null) {
+                        RankedItem nearest = findNearestItemToCenter();
+                        if (nearest != scrubItem) {
+                            scrubItem = nearest;
+                            cardPreview = null;
+                            if (listener != null) listener.onScrubItemChanged(nearest);
+                        }
+                    }
+
                     lastTouchX = x;
                     lastTouchY = y;
                     invalidate();
@@ -578,6 +609,14 @@ public class RankLineView extends View {
                     return true;
                 }
 
+                // Clear scrub preview
+                if (scrubActive) {
+                    scrubItem = null;
+                    scrubActive = false;
+                    cardPreview = null;
+                    if (listener != null) listener.onScrubItemChanged(null);
+                }
+
                 // Detect short tap on item
                 if (event.getActionMasked() == MotionEvent.ACTION_UP
                         && touchDownHitItem != null
@@ -616,6 +655,22 @@ public class RankLineView extends View {
             }
         }
         return null;
+    }
+
+    private RankedItem findNearestItemToCenter() {
+        if (items.isEmpty()) return null;
+        double hw = visibleWidth() / 2.0;
+        RankedItem nearest = null;
+        double minDist = Double.MAX_VALUE;
+        for (RankedItem item : items) {
+            double dist = Math.abs(item.position - center);
+            if (dist < minDist) {
+                minDist = dist;
+                nearest = item;
+            }
+        }
+        if (nearest != null && minDist > hw) return null;
+        return nearest;
     }
 
     // --- Drawing ---
@@ -834,6 +889,21 @@ public class RankLineView extends View {
             }
         }
 
+        // Highlight scrub preview item
+        if (scrubItem != null) {
+            float sx = rangeToScreenX(scrubItem.position);
+            if (sx > -THUMB_SIZE && sx < w + THUMB_SIZE) {
+                Paint hlPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                hlPaint.setColor(0xFFFF6F00);
+                hlPaint.setStyle(Paint.Style.STROKE);
+                hlPaint.setStrokeWidth(3f);
+                float hlLeft = sx - THUMB_SIZE / 2f - 3;
+                float hlTop = lineY - THUMB_SIZE - 15;
+                RectF hlRect = new RectF(hlLeft, hlTop, hlLeft + THUMB_SIZE + 6, hlTop + THUMB_SIZE + 6);
+                canvas.drawRoundRect(hlRect, 8, 8, hlPaint);
+            }
+        }
+
         // Draw repositioning item (lifted)
         if (isRepositioning && repositioningItem != null) {
             float sx = rangeToScreenX(repositioningItem.position);
@@ -985,29 +1055,34 @@ public class RankLineView extends View {
             canvas.drawText(muteIcon, cRight - 16, textY, infoPaint);
         }
 
-        if (isBrowse) {
+        boolean isScrub = scrubItem != null && browseItem == null;
+        if (isBrowse || isScrub) {
+            RankedItem displayItem = isBrowse ? browseItem : scrubItem;
+
             // Left: position value
             cursorLabelPaint.setTextSize(24f);
             cursorLabelPaint.setTextAlign(Paint.Align.LEFT);
-            canvas.drawText(String.format("%.6f", browseItem.position), cLeft + 16, textY, cursorLabelPaint);
+            canvas.drawText(String.format("%.6f", displayItem.position), cLeft + 16, textY, cursorLabelPaint);
             cursorLabelPaint.setTextSize(28f);
             cursorLabelPaint.setTextAlign(Paint.Align.CENTER);
 
-            // Right: #N of M + nav arrows (shift left if video icon present)
-            infoPaint.setColor(0xFFAAAAAA);
-            infoPaint.setTextAlign(Paint.Align.RIGHT);
-            float navRight = videoActive ? cRight - 56 : cRight - 16;
-            String nav = (browseIndex > 0 ? "\u276E  " : "    ")
-                    + "#" + (browseIndex + 1) + " of " + browseTotal
-                    + (browseIndex < browseTotal - 1 ? "  \u276F" : "");
-            canvas.drawText(nav, navRight, textY, infoPaint);
+            if (isBrowse) {
+                // Right: #N of M + nav arrows (shift left if video icon present)
+                infoPaint.setColor(0xFFAAAAAA);
+                infoPaint.setTextAlign(Paint.Align.RIGHT);
+                float navRight = videoActive ? cRight - 56 : cRight - 16;
+                String nav = (browseIndex > 0 ? "\u276E  " : "    ")
+                        + "#" + (browseIndex + 1) + " of " + browseTotal
+                        + (browseIndex < browseTotal - 1 ? "  \u276F" : "");
+                canvas.drawText(nav, navRight, textY, infoPaint);
+            }
 
             // Label if present
-            if (browseItem.label != null && !browseItem.label.isEmpty()) {
+            if (displayItem.label != null && !displayItem.label.isEmpty()) {
                 infoPaint.setColor(0xFFCCCCCC);
                 infoPaint.setTextAlign(Paint.Align.CENTER);
                 infoPaint.setTextSize(20f);
-                canvas.drawText(browseItem.label, (cLeft + cRight) / 2f, cTop + 28, infoPaint);
+                canvas.drawText(displayItem.label, (cLeft + cRight) / 2f, cTop + 28, infoPaint);
             }
         } else {
             // Inbox mode
