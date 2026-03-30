@@ -87,7 +87,6 @@ public class RankLineView extends View {
     private Runnable longPressRunnable;
 
     // --- Paints ---
-    private final Paint overviewBgPaint = new Paint();
     private final Paint overviewWindowPaint = new Paint();
     private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -98,10 +97,8 @@ public class RankLineView extends View {
     private final Paint thumbBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint clusterPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint clusterTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint inboxBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint inboxTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ghostPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint labelBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     // --- Listener ---
     public interface Listener {
@@ -140,7 +137,6 @@ public class RankLineView extends View {
     }
 
     private void init() {
-        overviewBgPaint.setColor(0xFF2A2A2A);
         overviewWindowPaint.setColor(0x441976D2);
         overviewWindowPaint.setStyle(Paint.Style.FILL);
 
@@ -177,17 +173,11 @@ public class RankLineView extends View {
         clusterTextPaint.setTextAlign(Paint.Align.CENTER);
         clusterTextPaint.setTypeface(Typeface.DEFAULT_BOLD);
 
-        inboxBgPaint.setColor(0xFF333333);
-        inboxBgPaint.setStyle(Paint.Style.FILL);
-
         inboxTextPaint.setColor(0xFFCCCCCC);
         inboxTextPaint.setTextSize(28f);
         inboxTextPaint.setTextAlign(Paint.Align.CENTER);
 
         ghostPaint.setAlpha(128);
-
-        labelBgPaint.setColor(0xCC000000);
-        labelBgPaint.setStyle(Paint.Style.FILL);
     }
 
     public void setListener(Listener l) { this.listener = l; }
@@ -785,32 +775,54 @@ public class RankLineView extends View {
         return modeBarInboxCount > 0 || modeBarBrowseCount > 0;
     }
 
-    // --- Shared pill drawing ---
+    // --- Shared styling constants ---
     private static final float PILL_HEIGHT = 48;
     private static final float PILL_PAD = 32;
     private static final float PILL_TEXT_SIZE = 32f;
+    private static final float CONTAINER_CORNER = 16f;
+    private static final int CONTAINER_BG = 0xFF1E1E1E;
 
     private final Paint pillBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pillTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint containerBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint infoPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint hlPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint tmpPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     {
         pillTextPaint.setTextSize(PILL_TEXT_SIZE);
         pillTextPaint.setTextAlign(Paint.Align.CENTER);
         pillTextPaint.setTypeface(Typeface.DEFAULT_BOLD);
+        containerBgPaint.setColor(CONTAINER_BG);
+        hlPaint.setColor(0xFFFF6F00);
+        hlPaint.setStyle(Paint.Style.STROKE);
+        hlPaint.setStrokeWidth(3f);
     }
 
     /** Draw a pill and return its width. Stores bounds in outRect if non-null. */
     private float drawPill(Canvas canvas, String label, float x, float y,
                            int bgColor, int textColor, RectF outRect) {
-        pillTextPaint.setTextSize(PILL_TEXT_SIZE);
+        return drawPill(canvas, label, x, y, bgColor, textColor, PILL_TEXT_SIZE, null, outRect);
+    }
+
+    private float drawPill(Canvas canvas, String label, float x, float y,
+                           int bgColor, int textColor, float textSize,
+                           Typeface typeface, RectF outRect) {
+        pillTextPaint.setTextSize(textSize);
+        if (typeface != null) pillTextPaint.setTypeface(typeface);
         float textW = pillTextPaint.measureText(label);
-        float w = textW + PILL_PAD * 2;
-        RectF rect = new RectF(x, y, x + w, y + PILL_HEIGHT);
+        float pad = PILL_PAD * (textSize / PILL_TEXT_SIZE); // scale padding with text size
+        float h = PILL_HEIGHT * (textSize / PILL_TEXT_SIZE);
+        float w = textW + pad * 2;
+        RectF rect = new RectF(x, y, x + w, y + h);
         if (outRect != null) outRect.set(rect);
         pillBgPaint.setColor(bgColor);
-        canvas.drawRoundRect(rect, PILL_HEIGHT / 2f, PILL_HEIGHT / 2f, pillBgPaint);
+        canvas.drawRoundRect(rect, h / 2f, h / 2f, pillBgPaint);
         pillTextPaint.setColor(textColor);
         float textVOffset = -(pillTextPaint.ascent() + pillTextPaint.descent()) / 2f;
-        canvas.drawText(label, x + w / 2f, y + PILL_HEIGHT / 2f + textVOffset, pillTextPaint);
+        canvas.drawText(label, x + w / 2f, y + h / 2f + textVOffset, pillTextPaint);
+        // Restore defaults
+        pillTextPaint.setTextSize(PILL_TEXT_SIZE);
+        pillTextPaint.setTypeface(Typeface.DEFAULT_BOLD);
         return w;
     }
 
@@ -820,10 +832,7 @@ public class RankLineView extends View {
         float barLeft = MODE_BAR_MARGIN;
         float barRight = w - MODE_BAR_MARGIN;
         modeBarRect.set(barLeft, barTop, barRight, barBot);
-
-        Paint barBg = new Paint(Paint.ANTI_ALIAS_FLAG);
-        barBg.setColor(0xFF1A1A1A);
-        canvas.drawRoundRect(modeBarRect, 16, 16, barBg);
+        canvas.drawRoundRect(modeBarRect, CONTAINER_CORNER, CONTAINER_CORNER, containerBgPaint);
 
         String inboxLabel = "Inbox (" + modeBarInboxCount + ")";
         String browseLabel = "Browse (" + modeBarBrowseCount + ")";
@@ -876,7 +885,7 @@ public class RankLineView extends View {
         float barWidth = right - left;
 
         // Background
-        canvas.drawRoundRect(left, top, right, bot, 8, 8, overviewBgPaint);
+        canvas.drawRoundRect(left, top, right, bot, CONTAINER_CORNER, CONTAINER_CORNER, containerBgPaint);
 
         // Visible window indicator
         double vw = visibleWidth();
@@ -1006,10 +1015,6 @@ public class RankLineView extends View {
         if (scrubItem != null) {
             float sx = rangeToScreenX(scrubItem.position);
             if (sx > -THUMB_SIZE && sx < w + THUMB_SIZE) {
-                Paint hlPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                hlPaint.setColor(0xFFFF6F00);
-                hlPaint.setStyle(Paint.Style.STROKE);
-                hlPaint.setStrokeWidth(3f);
                 float hlLeft = sx - THUMB_SIZE / 2f - 3;
                 float hlTop = lineY - THUMB_SIZE - 15;
                 RectF hlRect = new RectF(hlLeft, hlTop, hlLeft + THUMB_SIZE + 6, hlTop + THUMB_SIZE + 6);
@@ -1030,23 +1035,20 @@ public class RankLineView extends View {
     private void drawThumbnail(Canvas canvas, RankedItem item, float left, float top, int size, int alpha) {
         RectF rect = new RectF(left, top, left + size, top + size);
         if (item.thumbnail != null) {
-            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            p.setAlpha(alpha);
-            canvas.drawBitmap(item.thumbnail, null, rect, p);
+            tmpPaint.setAlpha(alpha);
+            canvas.drawBitmap(item.thumbnail, null, rect, tmpPaint);
         } else {
-            Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
-            bg.setColor(colorForItem(item));
-            bg.setAlpha(alpha);
-            canvas.drawRoundRect(rect, 6, 6, bg);
+            tmpPaint.setAlpha(alpha);
+            tmpPaint.setColor(colorForItem(item));
+            canvas.drawRoundRect(rect, 6, 6, tmpPaint);
 
             if (item.label != null && !item.label.isEmpty()) {
-                Paint tp = new Paint(Paint.ANTI_ALIAS_FLAG);
-                tp.setColor(0xFFFFFFFF);
-                tp.setAlpha(alpha);
-                tp.setTextSize(16f);
-                tp.setTextAlign(Paint.Align.CENTER);
+                infoPaint.setColor(0xFFFFFFFF);
+                infoPaint.setAlpha(alpha);
+                infoPaint.setTextSize(16f);
+                infoPaint.setTextAlign(Paint.Align.CENTER);
                 canvas.drawText(item.label.substring(0, Math.min(4, item.label.length())),
-                        left + size / 2f, top + size / 2f + 6, tp);
+                        left + size / 2f, top + size / 2f + 6, infoPaint);
             }
         }
         // Border
@@ -1063,16 +1065,16 @@ public class RankLineView extends View {
         // Dashed vertical line
         canvas.drawLine(cx, OVERVIEW_TOP + OVERVIEW_HEIGHT, cx, lineY + 50, cursorPaint);
 
-        // Position label
+        // Position label as pill
         int precision = (int) Math.max(1, Math.log10(currentZoom) + 1);
         String valStr = String.format("%." + precision + "f", rangeVal);
-
-        // Label background
-        float textWidth = cursorLabelPaint.measureText(valStr);
-        float labelY = lineY + 70;
-        canvas.drawRoundRect(cx - textWidth / 2f - 8, labelY - 24, cx + textWidth / 2f + 8,
-                labelY + 8, 6, 6, labelBgPaint);
-        canvas.drawText(valStr, cx, labelY, cursorLabelPaint);
+        float labelTextSize = 24f;
+        pillTextPaint.setTextSize(labelTextSize);
+        float labelW = pillTextPaint.measureText(valStr) + PILL_PAD * (labelTextSize / PILL_TEXT_SIZE) * 2;
+        float labelY = lineY + 50;
+        drawPill(canvas, valStr, cx - labelW / 2f, labelY,
+                0xCC000000, 0xFFFF6F00, labelTextSize, Typeface.MONOSPACE, null);
+        pillTextPaint.setTextSize(PILL_TEXT_SIZE);
 
         // Ghost thumbnail for placing item
         RankedItem ghost = isPlacing ? draggingItem : repositioningItem;
@@ -1098,8 +1100,9 @@ public class RankLineView extends View {
 
         // Neighbor preview during placement shows at full opacity
         int alpha = (inboxDragging && scrubItem == null) ? 80 : 255;
-        inboxBgPaint.setAlpha(alpha);
-        canvas.drawRoundRect(cardRect, 16, 16, inboxBgPaint);
+        containerBgPaint.setAlpha(alpha);
+        canvas.drawRoundRect(cardRect, CONTAINER_CORNER, CONTAINER_CORNER, containerBgPaint);
+        containerBgPaint.setAlpha(255);
 
         if (item == null) return;
 
@@ -1142,22 +1145,19 @@ public class RankLineView extends View {
             float cy = imgTop + imgH / 2f;
             RectF dst = new RectF(cx - drawW / 2f, cy - drawH / 2f,
                     cx + drawW / 2f, cy + drawH / 2f);
-            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-            p.setAlpha(alpha);
-            canvas.drawBitmap(item.thumbnail, null, dst, p);
+            tmpPaint.setAlpha(alpha);
+            canvas.drawBitmap(item.thumbnail, null, dst, tmpPaint);
         } else {
-            Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
-            bg.setColor(colorForItem(item));
-            bg.setAlpha(alpha);
+            tmpPaint.setColor(colorForItem(item));
+            tmpPaint.setAlpha(alpha);
             float sz = Math.min(imgW, imgH) * 0.5f;
             float cx = imgLeft + imgW / 2f;
             float cy = imgTop + imgH / 2f;
-            canvas.drawRoundRect(cx - sz / 2f, cy - sz / 2f, cx + sz / 2f, cy + sz / 2f, 12, 12, bg);
+            canvas.drawRoundRect(cx - sz / 2f, cy - sz / 2f, cx + sz / 2f, cy + sz / 2f, 12, 12, tmpPaint);
         }
 
         // --- Info bar ---
         float textY = infoTop + CARD_INFO_BAR / 2f + 8;
-        Paint infoPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         infoPaint.setTextSize(22f);
 
         // Mute icon for video items
@@ -1218,11 +1218,10 @@ public class RankLineView extends View {
 
             // Top hint
             if (!inboxDragging) {
-                Paint hintPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                hintPaint.setColor(0x55FFFFFF);
-                hintPaint.setTextSize(28f);
-                hintPaint.setTextAlign(Paint.Align.CENTER);
-                canvas.drawText("\u2191 drag up to place", (cLeft + cRight) / 2f, cTop + 30, hintPaint);
+                infoPaint.setColor(0x55FFFFFF);
+                infoPaint.setTextSize(28f);
+                infoPaint.setTextAlign(Paint.Align.CENTER);
+                canvas.drawText("\u2191 drag up to place", (cLeft + cRight) / 2f, cTop + 30, infoPaint);
             }
 
             // Reset
