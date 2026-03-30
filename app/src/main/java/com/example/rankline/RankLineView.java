@@ -90,6 +90,8 @@ public class RankLineView extends View {
     private boolean isPinching = false;
     private float prevPinchSpan = 0;
     private float prevPinchMidX = 0;
+    private double zoomOffset = 1.0; // multiplier to preserve pinch zoom during post-pinch scrub
+    private double zoomBeforeScrub = 1.0; // zoom at gesture start, restored on pinch
 
     // --- Paints ---
     private final Paint overviewWindowPaint = new Paint();
@@ -396,8 +398,13 @@ public class RankLineView extends View {
                 if (isBrowsing && !isPlacing && event.getPointerCount() == 2) {
                     isPinching = true;
                     cancelLongPressTimer();
+                    // Snap back to pre-scrub zoom if second finger came quickly
+                    if (System.currentTimeMillis() - touchDownTime < 300) {
+                        currentZoom = zoomBeforeScrub;
+                    }
                     prevPinchSpan = pinchSpan(event);
                     prevPinchMidX = pinchMidX(event);
+                    invalidate();
                 }
                 break;
 
@@ -408,6 +415,9 @@ public class RankLineView extends View {
                     int remaining = event.getActionIndex() == 0 ? 1 : 0;
                     lastTouchX = event.getX(remaining);
                     lastTouchY = event.getY(remaining);
+                    // Offset zoom-scrub so remaining finger preserves pinch zoom
+                    double computedAtFinger = computeZoom(event.getY(remaining));
+                    zoomOffset = currentZoom / computedAtFinger;
                 }
                 break;
 
@@ -426,6 +436,8 @@ public class RankLineView extends View {
                 lastTouchY = y;
                 touchDownTime = System.currentTimeMillis();
                 longPressTriggered = false;
+                zoomOffset = 1.0;
+                zoomBeforeScrub = currentZoom;
 
                 // Check undo pill hit
                 if (undoVisible && undoPillRect.contains(x, y)) {
@@ -587,8 +599,8 @@ public class RankLineView extends View {
                 }
 
                 if (isBrowsing && !longPressTriggered) {
-                    // Zoom-scrub browsing
-                    currentZoom = computeZoom(y);
+                    // Zoom-scrub browsing (zoomOffset preserves pinch zoom level)
+                    currentZoom = Math.max(1.0, zoomOffset * computeZoom(y));
                     double vw = visibleWidth();
                     double dxRange = -(dx / getWidth()) * vw * 2.5;
                     center += dxRange;
