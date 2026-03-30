@@ -120,6 +120,7 @@ public class RankLineView extends View {
         void onScrubItemChanged(RankedItem item);
         void onUndoTapped();
         void onBrowseDeleteRequested(RankedItem item);
+        void onClusterTapped(RankedItem item, double clusterCenter, double clusterSpan);
     }
     private Listener listener;
 
@@ -672,7 +673,20 @@ public class RankLineView extends View {
                         && Math.abs(x - touchDownX) < 20
                         && Math.abs(y - touchDownY) < 20) {
                     if (listener != null) {
-                        listener.onItemTapped(touchDownHitItem);
+                        // Check if item is in a cluster
+                        List<RankedItem> cluster = getClusterAt(touchDownHitItem);
+                        if (cluster.size() > 1) {
+                            double minPos = Double.MAX_VALUE, maxPos = -Double.MAX_VALUE;
+                            for (RankedItem ci : cluster) {
+                                minPos = Math.min(minPos, ci.position);
+                                maxPos = Math.max(maxPos, ci.position);
+                            }
+                            double clusterCenter = (minPos + maxPos) / 2.0;
+                            double clusterSpan = maxPos - minPos;
+                            listener.onClusterTapped(touchDownHitItem, clusterCenter, clusterSpan);
+                        } else {
+                            listener.onItemTapped(touchDownHitItem);
+                        }
                     }
                 }
                 touchDownHitItem = null;
@@ -702,6 +716,19 @@ public class RankLineView extends View {
             }
         }
         return null;
+    }
+
+    private List<RankedItem> getClusterAt(RankedItem target) {
+        float clusterThreshold = THUMB_SIZE * 0.8f;
+        float targetX = rangeToScreenX(target.position);
+        List<RankedItem> cluster = new ArrayList<>();
+        for (RankedItem item : items) {
+            float ix = rangeToScreenX(item.position);
+            if (Math.abs(ix - targetX) < clusterThreshold) {
+                cluster.add(item);
+            }
+        }
+        return cluster;
     }
 
     private RankedItem findNearestItemToCenter() {

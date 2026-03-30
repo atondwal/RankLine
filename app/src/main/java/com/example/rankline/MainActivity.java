@@ -677,6 +677,14 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
     }
 
     @Override
+    public void onClusterTapped(RankedItem item, double clusterCenter, double clusterSpan) {
+        // Zoom in to separate the cluster
+        double targetSpan = Math.max(clusterSpan * 3.0, 1e-10);
+        double zoom = Math.max(1.0, Math.min(1e8, 2.0 / targetSpan));
+        rankLineView.setViewState(clusterCenter, zoom);
+    }
+
+    @Override
     public void onBrowseDeleteRequested(RankedItem item) {
         String[] options = {"Edit Label", "Delete"};
         new AlertDialog.Builder(this)
