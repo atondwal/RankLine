@@ -61,13 +61,17 @@ public class RankLineView extends View {
     private RankedItem scrubItem = null;
     private boolean scrubActive = false;
 
+    // Undo pill state
+    private boolean undoVisible = false;
+    private final RectF undoPillRect = new RectF();
+
     // Mode bar state
     private int modeBarInboxCount = 0;
     private int modeBarBrowseCount = 0;
     private final RectF modeBarRect = new RectF();
     private final RectF modeBarInboxPill = new RectF();
     private final RectF modeBarBrowsePill = new RectF();
-    private static final int MODE_BAR_HEIGHT = 56;
+    private static final int MODE_BAR_HEIGHT = 72;
     private static final int MODE_BAR_MARGIN = 12;
 
     // --- Touch state ---
@@ -102,7 +106,7 @@ public class RankLineView extends View {
     // --- Listener ---
     public interface Listener {
         void onItemPlaced(RankedItem item);
-        void onItemRepositioned(RankedItem item);
+        void onItemRepositioned(RankedItem item, double previousPosition);
         void onInboxConsumed();
         void onItemTapped(RankedItem item);
         void onCardSkipForward();
@@ -114,6 +118,8 @@ public class RankLineView extends View {
         void onModeBarBrowseTapped();
         void onVideoMuteToggle();
         void onScrubItemChanged(RankedItem item);
+        void onUndoTapped();
+        void onBrowseDeleteRequested(RankedItem item);
     }
     private Listener listener;
 
@@ -229,6 +235,11 @@ public class RankLineView extends View {
     public boolean isBrowseMode() { return browseItem != null; }
 
     public RankedItem getScrubItem() { return scrubItem; }
+
+    public void setUndoVisible(boolean visible) {
+        this.undoVisible = visible;
+        invalidate();
+    }
 
     public void setVideoActive(boolean active, boolean muted) {
         this.videoActive = active;
@@ -389,6 +400,12 @@ public class RankLineView extends View {
                 touchDownTime = System.currentTimeMillis();
                 longPressTriggered = false;
 
+                // Check undo pill hit
+                if (undoVisible && undoPillRect.contains(x, y)) {
+                    if (listener != null) listener.onUndoTapped();
+                    return true;
+                }
+
                 // Check mode bar pill hit
                 if (!hasCard() && hasModeBar()) {
                     if (modeBarInboxPill.contains(x, y) && modeBarInboxCount > 0) {
@@ -405,10 +422,20 @@ public class RankLineView extends View {
                 if (hasCard() && cardRect.contains(x, y)) {
                     if (browseItem != null) {
                         browseTouching = true;
+                        // Start long-press timer for delete
+                        final RankedItem browseTarget = browseItem;
+                        longPressRunnable = () -> {
+                            if (browseTouching && !longPressTriggered) {
+                                longPressTriggered = true;
+                                browseTouching = false;
+                                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                                if (listener != null) listener.onBrowseDeleteRequested(browseTarget);
+                            }
+                        };
+                        handler.postDelayed(longPressRunnable, (long) LONG_PRESS_MS);
                     } else {
                         inboxTouching = true;
                     }
-                    cancelLongPressTimer();
                     return true;
                 }
 
@@ -535,7 +562,7 @@ public class RankLineView extends View {
                     float totalDx = x - touchDownX;
                     float totalDy = y - touchDownY; // positive = swipe down
                     if (event.getActionMasked() == MotionEvent.ACTION_UP && listener != null) {
-                        if (totalDy > 60 && Math.abs(totalDy) > Math.abs(totalDx)) {
+                        if (totalDy > 150 && Math.abs(totalDy) > Math.abs(totalDx) * 2) {
                             // Swipe down — remove from line, return to inbox
                             RankedItem item = browseItem;
                             items.remove(item);
@@ -579,6 +606,7 @@ public class RankLineView extends View {
                     draggingItem.position = viewCenterRange();
                     draggingItem.position = Math.max(-0.9999, Math.min(0.9999, draggingItem.position));
                     items.add(draggingItem);
+                    performHapticFeedback(HapticFeedbackConstants.CONFIRM);
                     if (listener != null) {
                         listener.onItemPlaced(draggingItem);
                         listener.onInboxConsumed(); // sets next inboxItem or null
@@ -596,10 +624,13 @@ public class RankLineView extends View {
                     float dpMoved = (float)(moved / visibleWidth() * getWidth());
                     if (dpMoved < CANCEL_THRESHOLD) {
                         repositioningItem.position = repositionOriginal;
-                    } else if (listener != null) {
-                        listener.onItemRepositioned(repositioningItem);
-                        if (browseItem != null) {
-                            listener.onBrowseRepositioned(repositioningItem);
+                    } else {
+                        performHapticFeedback(HapticFeedbackConstants.CONFIRM);
+                        if (listener != null) {
+                            listener.onItemRepositioned(repositioningItem, repositionOriginal);
+                            if (browseItem != null) {
+                                listener.onBrowseRepositioned(repositioningItem);
+                            }
                         }
                     }
                     repositioningItem = null;
@@ -694,6 +725,10 @@ public class RankLineView extends View {
         if (!hasCard() && !inboxDragging && hasModeBar()) {
             drawModeBar(canvas, w, h);
         }
+
+        if (undoVisible) {
+            drawUndoPill(canvas, w, h);
+        }
     }
 
     private boolean hasModeBar() {
@@ -716,7 +751,7 @@ public class RankLineView extends View {
         pillBg.setColor(0xFF2A2A2A);
         Paint pillText = new Paint(Paint.ANTI_ALIAS_FLAG);
         pillText.setColor(0xFFCCCCCC);
-        pillText.setTextSize(26f);
+        pillText.setTextSize(32f);
         pillText.setTextAlign(Paint.Align.CENTER);
         pillText.setTypeface(Typeface.DEFAULT_BOLD);
 
@@ -726,8 +761,8 @@ public class RankLineView extends View {
         boolean showInbox = modeBarInboxCount > 0;
         boolean showBrowse = modeBarBrowseCount > 0;
 
-        float pillH = 36;
-        float pillPad = 24;
+        float pillH = 48;
+        float pillPad = 32;
         float pillGap = 16;
         float pillY = barTop + (MODE_BAR_HEIGHT - pillH) / 2f;
 
@@ -744,14 +779,46 @@ public class RankLineView extends View {
         if (showInbox) {
             modeBarInboxPill.set(cx, pillY, cx + inboxW, pillY + pillH);
             canvas.drawRoundRect(modeBarInboxPill, pillH / 2f, pillH / 2f, pillBg);
-            canvas.drawText(inboxLabel, cx + inboxW / 2f, pillY + pillH / 2f + 9, pillText);
+            float textVOffset = -(pillText.ascent() + pillText.descent()) / 2f;
+            canvas.drawText(inboxLabel, cx + inboxW / 2f, pillY + pillH / 2f + textVOffset, pillText);
             cx += inboxW + pillGap;
         }
         if (showBrowse) {
             modeBarBrowsePill.set(cx, pillY, cx + browseW, pillY + pillH);
             canvas.drawRoundRect(modeBarBrowsePill, pillH / 2f, pillH / 2f, pillBg);
-            canvas.drawText(browseLabel, cx + browseW / 2f, pillY + pillH / 2f + 9, pillText);
+            float textVOffset = -(pillText.ascent() + pillText.descent()) / 2f;
+            canvas.drawText(browseLabel, cx + browseW / 2f, pillY + pillH / 2f + textVOffset, pillText);
         }
+    }
+
+    private void drawUndoPill(Canvas canvas, int w, int h) {
+        Paint pillBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        pillBg.setColor(0xFFFF6F00);
+        Paint pillText = new Paint(Paint.ANTI_ALIAS_FLAG);
+        pillText.setColor(0xFFFFFFFF);
+        pillText.setTextSize(32f);
+        pillText.setTextAlign(Paint.Align.CENTER);
+        pillText.setTypeface(Typeface.DEFAULT_BOLD);
+
+        String label = "Undo";
+        float textW = pillText.measureText(label);
+        float pillW = textW + 64;
+        float pillH = 52;
+        float pillX = (w - pillW) / 2f;
+
+        // Position: above card if card visible, otherwise in mode bar area
+        float pillY;
+        if (hasCard()) {
+            float lineY = getLineY();
+            pillY = lineY + 20;
+        } else {
+            pillY = h - MODE_BAR_HEIGHT - MODE_BAR_MARGIN - pillH - 12;
+        }
+
+        undoPillRect.set(pillX, pillY, pillX + pillW, pillY + pillH);
+        canvas.drawRoundRect(undoPillRect, pillH / 2f, pillH / 2f, pillBg);
+        float textVOffset = -(pillText.ascent() + pillText.descent()) / 2f;
+        canvas.drawText(label, pillX + pillW / 2f, pillY + pillH / 2f + textVOffset, pillText);
     }
 
     // --- Overview bar ---

@@ -60,6 +60,20 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
     private ExoPlayer exoPlayer;
     private boolean videoMuted = true;
 
+    // Undo stack (persistent)
+    private enum UndoType { PLACE, BROWSE_REMOVE, REPOSITION }
+    private static final int MAX_UNDO_STACK = 50;
+
+    private static class UndoAction {
+        UndoType type;
+        String itemId;
+        double position;
+        String imageUrl;
+        String label;
+        boolean isVideo;
+    }
+    private final List<UndoAction> undoStack = new ArrayList<>();
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -376,6 +390,7 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
             rankLineView.setInboxItem(null);
         }
         updateInboxCount();
+        saveRankings();
     }
 
     private void loadPreview(RankedItem item) {
@@ -481,12 +496,14 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
     // --- Listener callbacks ---
     @Override
     public void onItemPlaced(RankedItem item) {
+        recordUndo(UndoType.PLACE, item, item.position);
         saveRankings();
         updateModeBar();
     }
 
     @Override
-    public void onItemRepositioned(RankedItem item) {
+    public void onItemRepositioned(RankedItem item, double previousPosition) {
+        recordUndo(UndoType.REPOSITION, item, previousPosition);
         saveRankings();
     }
 
@@ -543,6 +560,7 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
     @Override
     public void onBrowseRemoveToInbox(RankedItem item) {
         hideVideoPlayer();
+        recordUndo(UndoType.BROWSE_REMOVE, item, item.position);
         // Add removed item to inbox queue (front, pushing any current inbox item back)
         RankedItem current = rankLineView.getInboxItem();
         if (current != null) {
@@ -626,6 +644,131 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
         }
     }
 
+    @Override
+    public void onBrowseDeleteRequested(RankedItem item) {
+        String name = (item.label != null && !item.label.isEmpty()) ? item.label : "this item";
+        new AlertDialog.Builder(this)
+                .setTitle("Delete")
+                .setMessage("Permanently delete " + name + "?")
+                .setPositiveButton("Delete", (d, w) -> {
+                    undoStack.removeIf(a -> a.itemId.equals(item.id));
+                    syncUndoVisibility();
+                    rankLineView.getItems().remove(item);
+                    browseSorted.remove(item);
+                    saveRankings();
+
+                    if (!browseSorted.isEmpty()) {
+                        if (browseIndex >= browseSorted.size()) {
+                            browseIndex = browseSorted.size() - 1;
+                        }
+                        showBrowseItem();
+                    } else {
+                        closeBrowse();
+                    }
+                    updateModeBar();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    // --- Undo ---
+    private void recordUndo(UndoType type, RankedItem item, double position) {
+        UndoAction action = new UndoAction();
+        action.type = type;
+        action.itemId = item.id;
+        action.position = position;
+        action.imageUrl = item.imageUrl;
+        action.label = item.label;
+        action.isVideo = item.isVideo;
+        undoStack.add(action);
+        if (undoStack.size() > MAX_UNDO_STACK) {
+            undoStack.remove(0);
+        }
+        rankLineView.setUndoVisible(true);
+    }
+
+    private void clearUndo() {
+        undoStack.clear();
+        rankLineView.setUndoVisible(false);
+    }
+
+    private void syncUndoVisibility() {
+        rankLineView.setUndoVisible(!undoStack.isEmpty());
+    }
+
+    @Override
+    public void onUndoTapped() {
+        if (undoStack.isEmpty()) return;
+        UndoAction action = undoStack.remove(undoStack.size() - 1);
+
+        switch (action.type) {
+            case PLACE:
+                // Find item on line and move to inbox
+                RankedItem placed = findItemById(action.itemId);
+                if (placed != null) {
+                    rankLineView.getItems().remove(placed);
+                    placed.position = 0;
+                    inboxQueue.addFirst(placed);
+                    showNextInboxItem();
+                }
+                break;
+            case BROWSE_REMOVE:
+                // Recreate item on line at original position
+                RankedItem restored = new RankedItem(
+                        action.itemId, action.position, action.imageUrl,
+                        action.label != null ? action.label : "");
+                restored.isVideo = action.isVideo;
+                rankLineView.getItems().add(restored);
+                loadThumbnail(restored);
+                // Remove from inbox if still there
+                removeFromInbox(action.itemId);
+                break;
+            case REPOSITION:
+                // Snap back to original position
+                RankedItem moved = findItemById(action.itemId);
+                if (moved != null) {
+                    moved.position = action.position;
+                    if (rankLineView.isBrowseMode()) {
+                        browseSorted.sort(Comparator.comparingDouble(a -> a.position));
+                        for (int i = 0; i < browseSorted.size(); i++) {
+                            if (browseSorted.get(i).id.equals(action.itemId)) {
+                                browseIndex = i;
+                                break;
+                            }
+                        }
+                        showBrowseItem();
+                    }
+                }
+                break;
+        }
+
+        syncUndoVisibility();
+        saveRankings();
+        updateModeBar();
+        rankLineView.invalidate();
+    }
+
+    private RankedItem findItemById(String id) {
+        for (RankedItem item : rankLineView.getItems()) {
+            if (item.id.equals(id)) return item;
+        }
+        return null;
+    }
+
+    private void removeFromInbox(String id) {
+        RankedItem current = rankLineView.getInboxItem();
+        if (current != null && current.id.equals(id)) {
+            showNextInboxItem();
+            return;
+        }
+        for (RankedItem qi : inboxQueue) {
+            if (qi.id.equals(id)) {
+                inboxQueue.remove(qi);
+                return;
+            }
+        }
+    }
+
     // --- Persistence ---
     private void saveRankings() {
         try {
@@ -650,6 +793,46 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
 
             if (lastBrowseItemId != null) {
                 root.put("lastBrowseItemId", lastBrowseItemId);
+            }
+
+            // Persist inbox queue
+            JSONArray inboxArr = new JSONArray();
+            for (RankedItem qi : inboxQueue) {
+                JSONObject qo = new JSONObject();
+                qo.put("id", qi.id);
+                qo.put("imageUrl", qi.imageUrl);
+                qo.put("label", qi.label != null ? qi.label : "");
+                if (qi.isVideo) qo.put("isVideo", true);
+                inboxArr.put(qo);
+            }
+            // Also save the current inbox card item
+            RankedItem currentInbox = rankLineView.getInboxItem();
+            if (currentInbox != null) {
+                JSONObject qo = new JSONObject();
+                qo.put("id", currentInbox.id);
+                qo.put("imageUrl", currentInbox.imageUrl);
+                qo.put("label", currentInbox.label != null ? currentInbox.label : "");
+                if (currentInbox.isVideo) qo.put("isVideo", true);
+                inboxArr.put(0, qo); // put at front
+            }
+            if (inboxArr.length() > 0) {
+                root.put("inbox", inboxArr);
+            }
+
+            // Persist undo stack
+            if (!undoStack.isEmpty()) {
+                JSONArray undoArr = new JSONArray();
+                for (UndoAction ua : undoStack) {
+                    JSONObject uo = new JSONObject();
+                    uo.put("type", ua.type.name());
+                    uo.put("itemId", ua.itemId);
+                    uo.put("position", ua.position);
+                    uo.put("imageUrl", ua.imageUrl);
+                    uo.put("label", ua.label != null ? ua.label : "");
+                    if (ua.isVideo) uo.put("isVideo", true);
+                    undoArr.put(uo);
+                }
+                root.put("undoStack", undoArr);
             }
 
             File f = new File(getFilesDir(), SAVE_FILE);
@@ -697,6 +880,43 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
             if (root.has("lastBrowseItemId")) {
                 lastBrowseItemId = root.getString("lastBrowseItemId");
             }
+
+            // Restore inbox queue
+            if (root.has("inbox")) {
+                JSONArray inboxArr = root.getJSONArray("inbox");
+                for (int i = 0; i < inboxArr.length(); i++) {
+                    JSONObject qo = inboxArr.getJSONObject(i);
+                    RankedItem qi = new RankedItem(
+                            qo.getString("id"),
+                            0,
+                            qo.getString("imageUrl"),
+                            qo.optString("label", "")
+                    );
+                    qi.isVideo = qo.optBoolean("isVideo", false);
+                    inboxQueue.addLast(qi);
+                    loadThumbnail(qi);
+                }
+                if (!inboxQueue.isEmpty()) {
+                    showNextInboxItem();
+                }
+            }
+
+            // Restore undo stack
+            if (root.has("undoStack")) {
+                JSONArray undoArr = root.getJSONArray("undoStack");
+                for (int i = 0; i < undoArr.length(); i++) {
+                    JSONObject uo = undoArr.getJSONObject(i);
+                    UndoAction ua = new UndoAction();
+                    ua.type = UndoType.valueOf(uo.getString("type"));
+                    ua.itemId = uo.getString("itemId");
+                    ua.position = uo.getDouble("position");
+                    ua.imageUrl = uo.getString("imageUrl");
+                    ua.label = uo.optString("label", "");
+                    ua.isVideo = uo.optBoolean("isVideo", false);
+                    undoStack.add(ua);
+                }
+            }
+            syncUndoVisibility();
 
             updateModeBar();
         } catch (Exception e) {
