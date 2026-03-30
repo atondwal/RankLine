@@ -4,4 +4,5 @@
     <string name="import_feed">Import Feed</string>
     <string name="add_gallery">Add from Gallery</string>
     <string name="browse_rankings">Browse Rankings</string>
+    <string name="export_rankings">Export Rankings</string>
 </resources>

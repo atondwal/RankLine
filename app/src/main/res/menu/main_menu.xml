@@ -17,4 +17,8 @@
         android:id="@+id/action_browse"
         android:title="@string/browse_rankings"
         app:showAsAction="never" />
+    <item
+        android:id="@+id/action_export"
+        android:title="@string/export_rankings"
+        app:showAsAction="never" />
 </menu>

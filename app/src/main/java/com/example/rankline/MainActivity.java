@@ -214,6 +214,9 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
         } else if (id == R.id.action_add_gallery) {
             openGalleryPicker();
             return true;
+        } else if (id == R.id.action_export) {
+            exportRankings();
+            return true;
         }
         return super.onOptionsItemSelected(item);
     }
@@ -300,6 +303,35 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
             } catch (Exception e2) {
                 Toast.makeText(this, "Invalid feed format", Toast.LENGTH_SHORT).show();
             }
+        }
+    }
+
+    // --- Export ---
+    private void exportRankings() {
+        try {
+            List<RankedItem> sorted = new ArrayList<>(rankLineView.getItems());
+            sorted.sort(Comparator.comparingDouble(a -> a.position));
+
+            JSONObject root = new JSONObject();
+            JSONArray arr = new JSONArray();
+            for (RankedItem item : sorted) {
+                JSONObject obj = new JSONObject();
+                obj.put("url", item.imageUrl);
+                obj.put("label", item.label != null ? item.label : "");
+                obj.put("position", item.position);
+                if (item.isVideo) obj.put("isVideo", true);
+                arr.put(obj);
+            }
+            root.put("items", arr);
+
+            String json = root.toString(2);
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("application/json");
+            intent.putExtra(Intent.EXTRA_TEXT, json);
+            intent.putExtra(Intent.EXTRA_SUBJECT, "RankLine Export");
+            startActivity(Intent.createChooser(intent, "Export Rankings"));
+        } catch (Exception e) {
+            Toast.makeText(this, "Export failed", Toast.LENGTH_SHORT).show();
         }
     }
 
