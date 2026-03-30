@@ -212,6 +212,8 @@ public class RankLineView extends View {
         this.browseItem = item;
         this.browseIndex = index;
         this.browseTotal = total;
+        this.scrubItem = null;
+        this.scrubActive = false;
         invalidate();
     }
 
@@ -875,8 +877,10 @@ public class RankLineView extends View {
 
     private void drawUndoPill(Canvas canvas, int w, int h) {
         // Floating undo pill when card is showing (mode bar not visible)
-        float barTop = getLineY() + 8;
-        float barBot = barTop + MODE_BAR_HEIGHT;
+        float lineY = getLineY();
+        float cardTop = lineY + 60;
+        float barBot = cardTop - 4;
+        float barTop = barBot - MODE_BAR_HEIGHT;
         float barLeft = w / 2f - 120;
         float barRight = w / 2f + 120;
         RectF barRect = new RectF(barLeft, barTop, barRight, barBot);
@@ -1171,8 +1175,9 @@ public class RankLineView extends View {
         }
 
         // --- Info bar ---
-        float textY = infoTop + CARD_INFO_BAR / 2f + 8;
         infoPaint.setTextSize(22f);
+        float textVOffset = -(infoPaint.ascent() + infoPaint.descent()) / 2f;
+        float textY = infoTop + CARD_INFO_BAR / 2f + textVOffset;
 
         // Mute icon for video items
         if (videoActive) {
