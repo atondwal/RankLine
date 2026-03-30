@@ -756,6 +756,35 @@ public class RankLineView extends View {
         return modeBarInboxCount > 0 || modeBarBrowseCount > 0;
     }
 
+    // --- Shared pill drawing ---
+    private static final float PILL_HEIGHT = 48;
+    private static final float PILL_PAD = 32;
+    private static final float PILL_TEXT_SIZE = 32f;
+
+    private final Paint pillBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pillTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    {
+        pillTextPaint.setTextSize(PILL_TEXT_SIZE);
+        pillTextPaint.setTextAlign(Paint.Align.CENTER);
+        pillTextPaint.setTypeface(Typeface.DEFAULT_BOLD);
+    }
+
+    /** Draw a pill and return its width. Stores bounds in outRect if non-null. */
+    private float drawPill(Canvas canvas, String label, float x, float y,
+                           int bgColor, int textColor, RectF outRect) {
+        pillTextPaint.setTextSize(PILL_TEXT_SIZE);
+        float textW = pillTextPaint.measureText(label);
+        float w = textW + PILL_PAD * 2;
+        RectF rect = new RectF(x, y, x + w, y + PILL_HEIGHT);
+        if (outRect != null) outRect.set(rect);
+        pillBgPaint.setColor(bgColor);
+        canvas.drawRoundRect(rect, PILL_HEIGHT / 2f, PILL_HEIGHT / 2f, pillBgPaint);
+        pillTextPaint.setColor(textColor);
+        float textVOffset = -(pillTextPaint.ascent() + pillTextPaint.descent()) / 2f;
+        canvas.drawText(label, x + w / 2f, y + PILL_HEIGHT / 2f + textVOffset, pillTextPaint);
+        return w;
+    }
+
     private void drawModeBar(Canvas canvas, int w, int h) {
         float barTop = h - MODE_BAR_HEIGHT - MODE_BAR_MARGIN;
         float barBot = h - MODE_BAR_MARGIN;
@@ -763,83 +792,50 @@ public class RankLineView extends View {
         float barRight = w - MODE_BAR_MARGIN;
         modeBarRect.set(barLeft, barTop, barRight, barBot);
 
-        // Bar background
         Paint barBg = new Paint(Paint.ANTI_ALIAS_FLAG);
         barBg.setColor(0xFF1A1A1A);
         canvas.drawRoundRect(modeBarRect, 16, 16, barBg);
 
-        Paint pillBg = new Paint(Paint.ANTI_ALIAS_FLAG);
-        pillBg.setColor(0xFF2A2A2A);
-        Paint pillText = new Paint(Paint.ANTI_ALIAS_FLAG);
-        pillText.setColor(0xFFCCCCCC);
-        pillText.setTextSize(32f);
-        pillText.setTextAlign(Paint.Align.CENTER);
-        pillText.setTypeface(Typeface.DEFAULT_BOLD);
-
-        // Measure pills
         String inboxLabel = "Inbox (" + modeBarInboxCount + ")";
         String browseLabel = "Browse (" + modeBarBrowseCount + ")";
         boolean showInbox = modeBarInboxCount > 0;
         boolean showBrowse = modeBarBrowseCount > 0;
 
-        float pillH = 48;
-        float pillPad = 32;
         float pillGap = 16;
-        float pillY = barTop + (MODE_BAR_HEIGHT - pillH) / 2f;
+        float pillY = barTop + (MODE_BAR_HEIGHT - PILL_HEIGHT) / 2f;
 
-        float inboxW = showInbox ? pillText.measureText(inboxLabel) + pillPad * 2 : 0;
-        float browseW = showBrowse ? pillText.measureText(browseLabel) + pillPad * 2 : 0;
+        pillTextPaint.setTextSize(PILL_TEXT_SIZE);
+        float inboxW = showInbox ? pillTextPaint.measureText(inboxLabel) + PILL_PAD * 2 : 0;
+        float browseW = showBrowse ? pillTextPaint.measureText(browseLabel) + PILL_PAD * 2 : 0;
         float totalW = inboxW + browseW + (showInbox && showBrowse ? pillGap : 0);
         float startX = (barLeft + barRight - totalW) / 2f;
 
-        // Reset pill rects
         modeBarInboxPill.setEmpty();
         modeBarBrowsePill.setEmpty();
 
         float cx = startX;
         if (showInbox) {
-            modeBarInboxPill.set(cx, pillY, cx + inboxW, pillY + pillH);
-            canvas.drawRoundRect(modeBarInboxPill, pillH / 2f, pillH / 2f, pillBg);
-            float textVOffset = -(pillText.ascent() + pillText.descent()) / 2f;
-            canvas.drawText(inboxLabel, cx + inboxW / 2f, pillY + pillH / 2f + textVOffset, pillText);
+            drawPill(canvas, inboxLabel, cx, pillY, 0xFF2A2A2A, 0xFFCCCCCC, modeBarInboxPill);
             cx += inboxW + pillGap;
         }
         if (showBrowse) {
-            modeBarBrowsePill.set(cx, pillY, cx + browseW, pillY + pillH);
-            canvas.drawRoundRect(modeBarBrowsePill, pillH / 2f, pillH / 2f, pillBg);
-            float textVOffset = -(pillText.ascent() + pillText.descent()) / 2f;
-            canvas.drawText(browseLabel, cx + browseW / 2f, pillY + pillH / 2f + textVOffset, pillText);
+            drawPill(canvas, browseLabel, cx, pillY, 0xFF2A2A2A, 0xFFCCCCCC, modeBarBrowsePill);
         }
     }
 
     private void drawUndoPill(Canvas canvas, int w, int h) {
-        Paint pillBg = new Paint(Paint.ANTI_ALIAS_FLAG);
-        pillBg.setColor(0xFFFF6F00);
-        Paint pillText = new Paint(Paint.ANTI_ALIAS_FLAG);
-        pillText.setColor(0xFFFFFFFF);
-        pillText.setTextSize(32f);
-        pillText.setTextAlign(Paint.Align.CENTER);
-        pillText.setTypeface(Typeface.DEFAULT_BOLD);
-
-        String label = "Undo";
-        float textW = pillText.measureText(label);
-        float pillW = textW + 64;
-        float pillH = 52;
-        float pillX = (w - pillW) / 2f;
-
-        // Position: above card if card visible, otherwise in mode bar area
         float pillY;
         if (hasCard()) {
-            float lineY = getLineY();
-            pillY = lineY + 20;
+            pillY = getLineY() + 20;
         } else {
-            pillY = h - MODE_BAR_HEIGHT - MODE_BAR_MARGIN - pillH - 12;
+            pillY = h - MODE_BAR_HEIGHT - MODE_BAR_MARGIN - PILL_HEIGHT - 12;
         }
 
-        undoPillRect.set(pillX, pillY, pillX + pillW, pillY + pillH);
-        canvas.drawRoundRect(undoPillRect, pillH / 2f, pillH / 2f, pillBg);
-        float textVOffset = -(pillText.ascent() + pillText.descent()) / 2f;
-        canvas.drawText(label, pillX + pillW / 2f, pillY + pillH / 2f + textVOffset, pillText);
+        pillTextPaint.setTextSize(PILL_TEXT_SIZE);
+        float textW = pillTextPaint.measureText("Undo");
+        float pillW = textW + PILL_PAD * 2;
+        float pillX = (w - pillW) / 2f;
+        drawPill(canvas, "Undo", pillX, pillY, 0xFFFF6F00, 0xFFFFFFFF, undoPillRect);
     }
 
     // --- Overview bar ---
