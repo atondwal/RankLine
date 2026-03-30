@@ -460,8 +460,10 @@ public class RankLineView extends View {
                     handler.postDelayed(longPressRunnable, (long) LONG_PRESS_MS);
                 }
 
-                // Browsing mode
-                isBrowsing = true;
+                // Browsing mode (only if not starting on a thumbnail)
+                if (touchDownHitItem == null) {
+                    isBrowsing = true;
+                }
                 return true;
 
             case MotionEvent.ACTION_MOVE:
