@@ -678,6 +678,46 @@ public class MainActivity extends AppCompatActivity implements RankLineView.List
 
     @Override
     public void onBrowseDeleteRequested(RankedItem item) {
+        String[] options = {"Edit Label", "Delete"};
+        new AlertDialog.Builder(this)
+                .setItems(options, (d, which) -> {
+                    if (which == 0) {
+                        showEditLabelDialog(item);
+                    } else {
+                        confirmDelete(item);
+                    }
+                })
+                .show();
+    }
+
+    private void showEditLabelDialog(RankedItem item) {
+        EditText input = new EditText(this);
+        input.setText(item.label != null ? item.label : "");
+        input.setSelectAllOnFocus(true);
+        input.setSingleLine();
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        int pad = 48;
+        layout.setPadding(pad, pad / 2, pad, 0);
+        layout.addView(input);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Edit Label")
+                .setView(layout)
+                .setPositiveButton("Save", (d, w) -> {
+                    item.label = input.getText().toString().trim();
+                    saveRankings();
+                    rankLineView.invalidate();
+                    if (rankLineView.isBrowseMode()) {
+                        showBrowseItem();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void confirmDelete(RankedItem item) {
         String name = (item.label != null && !item.label.isEmpty()) ? item.label : "this item";
         new AlertDialog.Builder(this)
                 .setTitle("Delete")
