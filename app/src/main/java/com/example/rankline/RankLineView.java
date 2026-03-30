@@ -86,6 +86,11 @@ public class RankLineView extends View {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Runnable longPressRunnable;
 
+    // Pinch-to-zoom state
+    private boolean isPinching = false;
+    private float prevPinchSpan = 0;
+    private float prevPinchMidX = 0;
+
     // --- Paints ---
     private final Paint overviewWindowPaint = new Paint();
     private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -357,6 +362,16 @@ public class RankLineView extends View {
         }
     }
 
+    private float pinchSpan(MotionEvent e) {
+        float dx = e.getX(0) - e.getX(1);
+        float dy = e.getY(0) - e.getY(1);
+        return (float) Math.sqrt(dx * dx + dy * dy);
+    }
+
+    private float pinchMidX(MotionEvent e) {
+        return (e.getX(0) + e.getX(1)) / 2f;
+    }
+
     // --- Touch handling ---
     @Override
     public boolean onTouchEvent(MotionEvent event) {
@@ -376,6 +391,23 @@ public class RankLineView extends View {
                     performHapticFeedback(HapticFeedbackConstants.REJECT);
                     invalidate();
                     return true;
+                }
+                // Start pinch-to-zoom during idle browsing
+                if (isBrowsing && !isPlacing && event.getPointerCount() == 2) {
+                    isPinching = true;
+                    cancelLongPressTimer();
+                    prevPinchSpan = pinchSpan(event);
+                    prevPinchMidX = pinchMidX(event);
+                }
+                break;
+
+            case MotionEvent.ACTION_POINTER_UP:
+                if (isPinching) {
+                    isPinching = false;
+                    // Update lastTouchX/Y to remaining finger to avoid jump
+                    int remaining = event.getActionIndex() == 0 ? 1 : 0;
+                    lastTouchX = event.getX(remaining);
+                    lastTouchY = event.getY(remaining);
                 }
                 break;
 
@@ -524,6 +556,32 @@ public class RankLineView extends View {
 
                     lastTouchX = x;
                     lastTouchY = y;
+                    invalidate();
+                    return true;
+                }
+
+                // Pinch-to-zoom during idle browsing
+                if (isPinching && event.getPointerCount() == 2) {
+                    float span = pinchSpan(event);
+                    float midX = pinchMidX(event);
+                    if (prevPinchSpan > 0) {
+                        float ratio = span / prevPinchSpan;
+                        // Zoom anchored at pinch midpoint
+                        double midRange = screenXToRange(midX);
+                        currentZoom = Math.max(1.0, Math.min(1e8, currentZoom * ratio));
+                        // Adjust center so midRange stays under the midpoint
+                        double newMidRange = screenXToRange(midX);
+                        center += midRange - newMidRange;
+                        clampCenter();
+                    }
+                    // Pan from midpoint shift
+                    double vwPinch = visibleWidth();
+                    double panRange = -((midX - prevPinchMidX) / getWidth()) * vwPinch;
+                    center += panRange;
+                    clampCenter();
+
+                    prevPinchSpan = span;
+                    prevPinchMidX = midX;
                     invalidate();
                     return true;
                 }
