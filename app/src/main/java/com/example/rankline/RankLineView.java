@@ -762,11 +762,11 @@ public class RankLineView extends View {
 
         drawCard(canvas, w, h);
 
-        if (!hasCard() && !inboxDragging && hasModeBar()) {
-            drawModeBar(canvas, w, h);
-        }
-
-        if (undoVisible) {
+        if (!hasCard() && !inboxDragging) {
+            if (hasModeBar() || undoVisible) {
+                drawModeBar(canvas, w, h);
+            }
+        } else if (undoVisible) {
             drawUndoPill(canvas, w, h);
         }
     }
@@ -826,6 +826,9 @@ public class RankLineView extends View {
         return w;
     }
 
+    private static final int PILL_BG = 0xFF2A2A2A;
+    private static final int PILL_TEXT = 0xFFCCCCCC;
+
     private void drawModeBar(Canvas canvas, int w, int h) {
         float barTop = h - MODE_BAR_HEIGHT - MODE_BAR_MARGIN;
         float barBot = h - MODE_BAR_MARGIN;
@@ -838,6 +841,7 @@ public class RankLineView extends View {
         String browseLabel = "Browse (" + modeBarBrowseCount + ")";
         boolean showInbox = modeBarInboxCount > 0;
         boolean showBrowse = modeBarBrowseCount > 0;
+        String undoLabel = "Undo";
 
         float pillGap = 16;
         float pillY = barTop + (MODE_BAR_HEIGHT - PILL_HEIGHT) / 2f;
@@ -845,35 +849,45 @@ public class RankLineView extends View {
         pillTextPaint.setTextSize(PILL_TEXT_SIZE);
         float inboxW = showInbox ? pillTextPaint.measureText(inboxLabel) + PILL_PAD * 2 : 0;
         float browseW = showBrowse ? pillTextPaint.measureText(browseLabel) + PILL_PAD * 2 : 0;
-        float totalW = inboxW + browseW + (showInbox && showBrowse ? pillGap : 0);
+        float undoW = undoVisible ? pillTextPaint.measureText(undoLabel) + PILL_PAD * 2 : 0;
+        float totalW = inboxW + browseW + undoW;
+        int pillCount = (showInbox ? 1 : 0) + (showBrowse ? 1 : 0) + (undoVisible ? 1 : 0);
+        totalW += Math.max(0, pillCount - 1) * pillGap;
         float startX = (barLeft + barRight - totalW) / 2f;
 
         modeBarInboxPill.setEmpty();
         modeBarBrowsePill.setEmpty();
+        undoPillRect.setEmpty();
 
         float cx = startX;
         if (showInbox) {
-            drawPill(canvas, inboxLabel, cx, pillY, 0xFF2A2A2A, 0xFFCCCCCC, modeBarInboxPill);
+            drawPill(canvas, inboxLabel, cx, pillY, PILL_BG, PILL_TEXT, modeBarInboxPill);
             cx += inboxW + pillGap;
         }
         if (showBrowse) {
-            drawPill(canvas, browseLabel, cx, pillY, 0xFF2A2A2A, 0xFFCCCCCC, modeBarBrowsePill);
+            drawPill(canvas, browseLabel, cx, pillY, PILL_BG, PILL_TEXT, modeBarBrowsePill);
+            cx += browseW + pillGap;
+        }
+        if (undoVisible) {
+            drawPill(canvas, undoLabel, cx, pillY, PILL_BG, 0xFFFF6F00, undoPillRect);
         }
     }
 
     private void drawUndoPill(Canvas canvas, int w, int h) {
-        float pillY;
-        if (hasCard()) {
-            pillY = getLineY() + 20;
-        } else {
-            pillY = h - MODE_BAR_HEIGHT - MODE_BAR_MARGIN - PILL_HEIGHT - 12;
-        }
+        // Floating undo pill when card is showing (mode bar not visible)
+        float barTop = getLineY() + 8;
+        float barBot = barTop + MODE_BAR_HEIGHT;
+        float barLeft = w / 2f - 120;
+        float barRight = w / 2f + 120;
+        RectF barRect = new RectF(barLeft, barTop, barRight, barBot);
+        canvas.drawRoundRect(barRect, CONTAINER_CORNER, CONTAINER_CORNER, containerBgPaint);
 
+        float pillY = barTop + (MODE_BAR_HEIGHT - PILL_HEIGHT) / 2f;
         pillTextPaint.setTextSize(PILL_TEXT_SIZE);
         float textW = pillTextPaint.measureText("Undo");
         float pillW = textW + PILL_PAD * 2;
-        float pillX = (w - pillW) / 2f;
-        drawPill(canvas, "Undo", pillX, pillY, 0xFFFF6F00, 0xFFFFFFFF, undoPillRect);
+        float pillX = (barLeft + barRight - pillW) / 2f;
+        drawPill(canvas, "Undo", pillX, pillY, PILL_BG, 0xFFFF6F00, undoPillRect);
     }
 
     // --- Overview bar ---
